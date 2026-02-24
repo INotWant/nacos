@@ -227,6 +227,7 @@ public class ExternalConfigInfoGrayPersistServiceImpl implements ConfigInfoGrayP
     @Override
     public ConfigOperateResult updateConfigInfo4Gray(ConfigInfo configInfo, String grayName, String grayRule,
             String srcIp, String srcUser) {
+        // TODO gaoting 问题二（含下面的 npe）
         return tjt.execute(status -> {
             String appNameTmp = StringUtils.defaultEmptyIfBlank(configInfo.getAppName());
             String tenantTmp = StringUtils.defaultEmptyIfBlank(configInfo.getTenant());
@@ -240,6 +241,7 @@ public class ExternalConfigInfoGrayPersistServiceImpl implements ConfigInfoGrayP
                         LogUtil.FATAL_LOG.error("expected config info[dataid:{}, group:{}, tenent:{}] but not found.",
                                 configInfo.getDataId(), configInfo.getGroup(), configInfo.getTenant());
                     }
+                    return new ConfigOperateResult(false);
                 }
                 
                 String md5 = MD5Utils.md5Hex(configInfo.getContent(), Constants.ENCODE);
@@ -270,12 +272,23 @@ public class ExternalConfigInfoGrayPersistServiceImpl implements ConfigInfoGrayP
     @Override
     public ConfigOperateResult updateConfigInfo4GrayCas(ConfigInfo configInfo, String grayName, String grayRule,
             String srcIp, String srcUser) {
+        // TODO gaoting 问题二（含下面的 npe）
         return tjt.execute(status -> {
             String appNameTmp = StringUtils.defaultEmptyIfBlank(configInfo.getAppName());
             String tenantTmp = StringUtils.defaultEmptyIfBlank(configInfo.getTenant());
             String grayNameTmp = StringUtils.isBlank(grayName) ? StringUtils.EMPTY : grayName.trim();
             String grayRuleTmp = StringUtils.isBlank(grayRule) ? StringUtils.EMPTY : grayRule.trim();
             try {
+                ConfigInfoGrayWrapper oldConfigAllInfo4Gray = findConfigInfo4Gray(configInfo.getDataId(),
+                        configInfo.getGroup(), tenantTmp, grayNameTmp);
+                if (oldConfigAllInfo4Gray == null) {
+                    if (LogUtil.FATAL_LOG.isErrorEnabled()) {
+                        LogUtil.FATAL_LOG.error("expected config info[dataid:{}, group:{}, tenent:{}] but not found.",
+                                configInfo.getDataId(), configInfo.getGroup(), configInfo.getTenant());
+                    }
+                    return new ConfigOperateResult(false);
+                }
+
                 String md5 = MD5Utils.md5Hex(configInfo.getContent(), Constants.ENCODE);
                 ConfigInfoGrayMapper configInfoGrayMapper = mapperManager.findMapper(
                         dataSourceService.getDataSourceType(), TableConstant.CONFIG_INFO_GRAY);
@@ -295,25 +308,15 @@ public class ExternalConfigInfoGrayPersistServiceImpl implements ConfigInfoGrayP
                 
                 final MapperResult mapperResult = configInfoGrayMapper.updateConfigInfo4GrayCas(context);
                 boolean success = jt.update(mapperResult.getSql(), mapperResult.getParamList().toArray()) > 0;
-                
-                ConfigInfoGrayWrapper oldConfigAllInfo4Gray = findConfigInfo4Gray(configInfo.getDataId(),
-                        configInfo.getGroup(), tenantTmp, grayNameTmp);
-                if (oldConfigAllInfo4Gray == null) {
-                    if (LogUtil.FATAL_LOG.isErrorEnabled()) {
-                        LogUtil.FATAL_LOG.error("expected config info[dataid:{}, group:{}, tenent:{}] but not found.",
-                                configInfo.getDataId(), configInfo.getGroup(), configInfo.getTenant());
-                    }
-                }
-                
-                if (!GRAY_MIGRATE_FLAG.get()) {
-                    Timestamp now = new Timestamp(System.currentTimeMillis());
-                    historyConfigInfoPersistService.insertConfigHistoryAtomic(oldConfigAllInfo4Gray.getId(),
-                            oldConfigAllInfo4Gray, srcIp, srcUser, now, "U", Constants.GRAY, grayNameTmp,
-                            ConfigExtInfoUtil.getExtInfoFromGrayInfo(oldConfigAllInfo4Gray.getGrayName(),
-                                    oldConfigAllInfo4Gray.getGrayRule(), oldConfigAllInfo4Gray.getSrcUser()));
-                }
-                
+
                 if (success) {
+                    if (!GRAY_MIGRATE_FLAG.get()) {
+                        Timestamp now = new Timestamp(System.currentTimeMillis());
+                        historyConfigInfoPersistService.insertConfigHistoryAtomic(oldConfigAllInfo4Gray.getId(),
+                                oldConfigAllInfo4Gray, srcIp, srcUser, now, "U", Constants.GRAY, grayNameTmp,
+                                ConfigExtInfoUtil.getExtInfoFromGrayInfo(oldConfigAllInfo4Gray.getGrayName(),
+                                        oldConfigAllInfo4Gray.getGrayRule(), oldConfigAllInfo4Gray.getSrcUser()));
+                    }
                     return getGrayOperateResult(configInfo.getDataId(), configInfo.getGroup(), tenantTmp, grayNameTmp);
                 } else {
                     return new ConfigOperateResult(false);
